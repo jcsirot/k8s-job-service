@@ -1,0 +1,16 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: job-spawner
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: job-spawner
+    spec:
+      containers:
+      - name: job-spawner
+        image: jcsirot/job-spawner
+        ports:
+        - containerPort: 80
