@@ -14,11 +14,12 @@ limitations under the License.
 package main
 
 import (
+	"flag"
 	"fmt"
-	"log"
-	"net/http"
 	"math/rand"
+	"net/http"
 
+	"github.com/golang/glog"
 	"github.com/gorilla/mux"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/api/v1"
@@ -27,28 +28,32 @@ import (
 )
 
 func main() {
+	flag.Set("logtostderr", "true")
+	flag.Parse()
 	router := mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/", Spawn)
-	log.Fatal(http.ListenAndServe(":80", router))
+	glog.Fatalf("Unable to start HTTP server: %v", http.ListenAndServe(":80", router))
+	glog.Info("Job spawner is ready...")
 }
 
+/* Spawn a new job */
 func Spawn(w http.ResponseWriter, r *http.Request) {
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		panic(err.Error())
+		glog.Fatalf("Failed to load client config: %v", err)
 	}
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		panic(err.Error())
+		glog.Fatalf("Failed to create kubernetes client: %v", err)
 	}
 	opts := v1.ListOptions{LabelSelector: "app=model-builder"}
 	jobs, err := clientset.BatchV1().Jobs("").List(opts)
 	if err != nil {
-		panic(err.Error())
+		glog.Fatalf("Failed to get kubernetes Jobs API: %v", err)
 	}
-	fmt.Printf("There are %d jobs with label app=model-builder in the cluster\n", len(jobs.Items))
+	glog.Infof("There are %d jobs with label app=model-builder in the cluster", len(jobs.Items))
 
 	if len(jobs.Items) >= 5 {
 		w.WriteHeader(http.StatusOK)
@@ -65,37 +70,38 @@ func Spawn(w http.ResponseWriter, r *http.Request) {
 		jobWait = "10"
 	}
 
-	fmt.Printf("Spawning a new job.\n")
+	glog.Info("Spawning a new job")
 
 	jobName := fmt.Sprintf("model-builder-%d", rand.Int31n(100000))
 	comp := int32(1)
-	jobConf := &jobv1.Job {
-		ObjectMeta: v1.ObjectMeta {
+	jobConf := &jobv1.Job{
+		ObjectMeta: v1.ObjectMeta{
 			Name: jobName,
-			Labels: map[string]string {
-				"app": "model-builder" }},
-		Spec: jobv1.JobSpec {
+			Labels: map[string]string{
+				"app": "model-builder"}},
+		Spec: jobv1.JobSpec{
 			Completions: &comp,
-			Template: v1.PodTemplateSpec {
-				ObjectMeta: v1.ObjectMeta {
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: v1.ObjectMeta{
 					Name: jobName,
-					Labels: map[string]string {
-						"app": "model-builder" }},
-				Spec: v1.PodSpec {
-					Containers: []v1.Container {
-						{ Name: "job",
-						  Image: "jcsirot/simple-job",
-							Env: []v1.EnvVar {
-								{Name: "JOB_COUNT", Value: jobCount },
-								{Name: "JOB_WAIT", Value: jobWait }}}},
-					RestartPolicy: v1.RestartPolicyNever }}}}
+					Labels: map[string]string{
+						"app": "model-builder"}},
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{Name: "job",
+							Image: "jcsirot/simple-job",
+							Env: []v1.EnvVar{
+								{Name: "JOB_COUNT", Value: jobCount},
+								{Name: "JOB_WAIT", Value: jobWait}}}},
+					RestartPolicy: v1.RestartPolicyNever}}}}
 	_, err2 := clientset.BatchV1().Jobs("default").Create(jobConf)
 	if err2 != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "An error occurred: %s\n", err2)
+		glog.Errorf("Failed to create new job: %v", err2)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "Spawning a new job")
+	fmt.Fprintf(w, "Spawning job %s\n", jobName)
 }
